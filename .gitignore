@@ -1,0 +1,27 @@
+# Build outputs
+build/
+dist/
+
+# Runtime data — user-specific, never commit
+data/session.json
+data/catalog_cache.json
+
+# Downloaded tool executables
+tools/
+
+# Large media — too big for git (176 MB)
+resources/background.mp4
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# IDE
+.idea/
+.vscode/
+*.iml
+
+# PyInstaller
+*.spec.bak
