@@ -37,6 +37,9 @@ import requests
 from dotenv import load_dotenv
 import os
 
+sys.stdout.reconfigure(encoding="utf-8")
+sys.stderr.reconfigure(encoding="utf-8")
+
 ROOT = Path(__file__).resolve().parent        # vacantrix-platform/
 load_dotenv(ROOT / ".env")
 load_dotenv(ROOT.parent / "Vacantrix" / ".env")  # запасной .env из основного проекта
@@ -139,7 +142,7 @@ def get_or_create_release(version: str) -> tuple[int, str]:
     tag = f"v{version}"
     r = requests.get(
         f"https://api.github.com/repos/{GITHUB_OWNER}/{GITHUB_REPO}/releases/tags/{tag}",
-        headers=_gh_headers(), timeout=15,
+        headers=_gh_headers(), timeout=60,
     )
 
     if r.status_code == 200:
@@ -157,7 +160,7 @@ def get_or_create_release(version: str) -> tuple[int, str]:
             "draft":      False,
             "prerelease": False,
         },
-        timeout=15,
+        timeout=60,
     )
     if r.status_code not in (200, 201):
         print(f"❌ Ошибка создания релиза: {r.status_code} {r.text[:200]}")
@@ -220,7 +223,7 @@ def update_website(version: str) -> None:
     r = requests.patch(
         f"{SUPABASE_URL}/rest/v1/web_apps?slug=eq.{WEB_APP_SLUG}",
         headers=_sb_headers(),
-        json={"download_url": LATEST_DL_URL, "version": version},
+        json={"download_url": LATEST_DL_URL},
         timeout=10,
     )
     if r.status_code in (200, 204):
