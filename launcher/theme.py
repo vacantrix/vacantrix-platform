@@ -130,6 +130,12 @@ QPushButton[class="flat"] {{
     padding: 6px 14px;
 }}
 QPushButton[class="flat"]:hover {{ color: #ff8888; background: rgba(255,50,50,15); border-radius: 6px; }}
+QPushButton[class="flat"]:pressed {{
+    color: #aa4444;
+    background: rgba(120,10,10,30);
+    border-radius: 6px;
+    padding: 8px 14px 4px 14px;
+}}
 QPushButton[class="danger"] {{
     background: transparent;
     border: 1px solid rgba(200,25,25,120);
@@ -141,6 +147,12 @@ QPushButton[class="danger"] {{
 QPushButton[class="danger"]:hover {{
     background: rgba(200,25,25,40);
     border-color: {BACT};
+}}
+QPushButton[class="danger"]:pressed {{
+    background: rgba(100,8,8,80);
+    border-color: rgba(140,15,15,150);
+    color: #884444;
+    padding: 8px 14px 4px 14px;
 }}
 QPushButton[class="launch"] {{
     background: qlineargradient(x1:0,y1:0,x2:0,y2:1,
@@ -166,6 +178,19 @@ QPushButton[class="launch"]:hover {{
         stop:0.50 rgba(220,32,32,240),
         stop:0.92 rgba(120,10,10,255),
         stop:1.00 rgba(30,0,0,255));
+}}
+QPushButton[class="launch"]:pressed {{
+    background: qlineargradient(x1:0,y1:0,x2:0,y2:1,
+        stop:0 rgba(40,3,3,255),
+        stop:1 rgba(100,8,8,255));
+    border-top:    1px solid rgba(60,4,4,200);
+    border-bottom: 1px solid rgba(200,30,30,150);
+    border-left:   1px solid rgba(60,4,4,150);
+    border-right:  1px solid rgba(60,4,4,150);
+    border-radius: 10px;
+    padding: 14px 28px 10px 28px;
+    color: #aa6666;
+    font-weight: bold;
 }}
 
 /* ── Checkable plan buttons ───────────────────────────── */

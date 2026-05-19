@@ -198,6 +198,13 @@ class CatalogScreen(QWidget):
         self._status_lbl.setText("Обновление...")
         self._fetch()
 
+    def refresh_download_state(self):
+        """Перерисовывает карточки из кеша — обновляет кнопки после скачивания."""
+        cached = disk_cache.load()
+        if cached:
+            tools, subs = cached
+            self._render(tools, subs, from_cache=True)
+
     # ── Build UI ──────────────────────────────────────────────────────────────
 
     def _build(self):

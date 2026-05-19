@@ -7,10 +7,40 @@ from PySide6.QtWidgets import (
     QPushButton, QFrame, QScrollArea, QMessageBox,
 )
 
+from PySide6.QtCore import QThread, Signal as QSignal
 from launcher.core.auth_manager import AuthManager
 from launcher.core.downloader import needs_update, is_downloaded, TOOLS_DIR
+from launcher.core import supabase_api as api
 from launcher.widgets.image_carousel import ImageCarousel
 from launcher import theme
+
+TRIAL_LIMIT = 10
+
+
+class _TrialWorker(QThread):
+    done = QSignal(int)
+
+    def __init__(self, token: str, tool_id: str):
+        super().__init__()
+        self._token, self._tool_id = token, tool_id
+
+    def run(self):
+        try:
+            self.done.emit(api.get_trial(self._token, self._tool_id))
+        except Exception:
+            self.done.emit(0)
+
+_RESOURCES = Path(__file__).resolve().parent.parent.parent / "resources"
+
+_LOCAL_SCREENSHOTS: dict[str, list[str]] = {
+    "vacantrix": [
+        str(_RESOURCES / "screenshots" / "01_main.png"),
+        str(_RESOURCES / "screenshots" / "02_details.png"),
+        str(_RESOURCES / "screenshots" / "03_stats.png"),
+        str(_RESOURCES / "screenshots" / "04_settings.png"),
+        str(_RESOURCES / "screenshots" / "05_hh.jpg"),
+    ],
+}
 
 
 def _days_left(expires_at: str) -> int:
@@ -26,9 +56,11 @@ class ToolDetailScreen(QWidget):
 
     def __init__(self, auth: AuthManager, parent=None):
         super().__init__(parent)
-        self._auth = auth
-        self._tool = None
-        self._sub  = None
+        self._auth         = auth
+        self._tool         = None
+        self._sub          = None
+        self._trial_used   = 0
+        self._trial_worker = None
         self._build()
 
     # ── Build UI ──────────────────────────────────────────────────────────────
@@ -141,6 +173,23 @@ class ToolDetailScreen(QWidget):
 
         sb_lay.addWidget(self._status_frame)
 
+        # ── Trial banner ────────────────────────────────────────────────────────
+        self._trial_frame = QFrame()
+        self._trial_frame.setProperty("class", "card")
+        tf_lay = QVBoxLayout(self._trial_frame)
+        tf_lay.setContentsMargins(12, 10, 12, 10)
+        tf_lay.setSpacing(4)
+        self._trial_lbl = QLabel("")
+        self._trial_lbl.setAlignment(Qt.AlignCenter)
+        self._trial_lbl.setStyleSheet("color: #ffd060; font-size: 12px; font-weight: bold;")
+        tf_lay.addWidget(self._trial_lbl)
+        self._trial_sub = QLabel("Пробный доступ — без подписки")
+        self._trial_sub.setAlignment(Qt.AlignCenter)
+        self._trial_sub.setStyleSheet("color: #666; font-size: 10px;")
+        tf_lay.addWidget(self._trial_sub)
+        self._trial_frame.hide()
+        sb_lay.addWidget(self._trial_frame)
+
         # ── Action button (Launch / Download+Launch / Buy / Coming soon) ────────
         self._action_btn = QPushButton("")
         self._action_btn.setFixedHeight(46)
@@ -177,8 +226,14 @@ class ToolDetailScreen(QWidget):
     # ── Public ────────────────────────────────────────────────────────────────
 
     def load(self, tool: dict, subscription: dict | None):
-        self._tool = tool
-        self._sub  = subscription
+        self._tool       = tool
+        self._sub        = subscription
+        self._trial_used = 0
+        # Загружаем счётчик пробных откликов в фоне
+        if self._auth.access_token:
+            self._trial_worker = _TrialWorker(self._auth.access_token, tool["id"])
+            self._trial_worker.done.connect(self._on_trial_loaded)
+            self._trial_worker.start()
 
         self._header_title.setText(tool.get("name", ""))
         self._tool_name_lbl.setText(tool.get("name", ""))
@@ -191,8 +246,11 @@ class ToolDetailScreen(QWidget):
 
         # Carousel
         old = self._carousel
+        screenshots = tool.get("screenshots") or []
+        if not screenshots:
+            screenshots = _LOCAL_SCREENSHOTS.get(tool.get("slug", ""), [])
         new = ImageCarousel(
-            tool.get("screenshots") or [], tool_name=tool.get("name", ""), parent=self
+            screenshots, tool_name=tool.get("name", ""), parent=self
         )
         old.deleteLater()
         self._carousel = new
@@ -215,6 +273,10 @@ class ToolDetailScreen(QWidget):
         """Обновляет кнопки без перезагрузки данных — вызывается после скачивания."""
         if self._tool:
             self._update_status()
+
+    def _on_trial_loaded(self, used: int):
+        self._trial_used = used
+        self._update_status()
 
     # ── Internal ──────────────────────────────────────────────────────────────
 
@@ -276,16 +338,26 @@ class ToolDetailScreen(QWidget):
 
         else:
             # ── Нет подписки ──────────────────────────────────────────────────
-            self._status_lbl.setText("🔒  Нет подписки")
-            self._status_lbl.setStyleSheet(
-                "color: #c41c1c; font-size: 13px; font-weight: bold;"
-            )
-            self._days_lbl.setText("")
-            self._action_btn.setText("Купить подписку")
-            self._action_btn.clicked.connect(lambda: self.buy_requested.emit(tool))
+            trial_left = TRIAL_LIMIT - self._trial_used
+            has_trial  = trial_left > 0
+
+            if has_trial:
+                self._status_lbl.setText("🎁  Пробный доступ")
+                self._status_lbl.setStyleSheet("color: #ffd060; font-size: 13px; font-weight: bold;")
+                self._days_lbl.setText(f"Осталось {trial_left} из {TRIAL_LIMIT} пробных откликов")
+                self._trial_frame.show()
+                self._trial_lbl.setText(f"🔓  {trial_left} / {TRIAL_LIMIT} откликов")
+                self._action_btn.setText("Купить подписку")
+                self._action_btn.clicked.connect(lambda: self.buy_requested.emit(tool))
+            else:
+                self._status_lbl.setText("🔒  Нет подписки")
+                self._status_lbl.setStyleSheet("color: #c41c1c; font-size: 13px; font-weight: bold;")
+                self._days_lbl.setText("Пробный лимит исчерпан")
+                self._trial_frame.hide()
+                self._action_btn.setText("Купить подписку")
+                self._action_btn.clicked.connect(lambda: self.buy_requested.emit(tool))
 
             if not downloaded:
-                # Не скачан — предлагаем скачать
                 if tool.get("download_url"):
                     self._download_btn.setText("⬇  Скачать")
                     self._download_btn.show()
@@ -293,7 +365,6 @@ class ToolDetailScreen(QWidget):
                         lambda: self.download_requested.emit(tool)
                     )
             elif outdated:
-                # Устаревшая версия — только «Обновить», без запуска
                 self._download_btn.setText("🔄  Обновить")
                 self._download_btn.show()
                 self._download_btn.clicked.connect(
@@ -302,14 +373,17 @@ class ToolDetailScreen(QWidget):
                 self._delete_btn.show()
                 self._delete_btn.clicked.connect(self._confirm_delete)
             else:
-                # Актуальная версия — можно запустить
-                self._download_btn.setText("▶  Запустить")
-                self._download_btn.show()
-                self._download_btn.clicked.connect(
-                    lambda: self.launch_requested.emit(tool)
-                )
-                self._delete_btn.show()
-                self._delete_btn.clicked.connect(self._confirm_delete)
+                if has_trial:
+                    self._download_btn.setText(f"▶  Запустить пробно ({trial_left})")
+                    self._download_btn.show()
+                    self._download_btn.clicked.connect(
+                        lambda: self.launch_requested.emit(tool)
+                    )
+                    self._delete_btn.show()
+                    self._delete_btn.clicked.connect(self._confirm_delete)
+                else:
+                    self._delete_btn.show()
+                    self._delete_btn.clicked.connect(self._confirm_delete)
 
     def _confirm_delete(self):
         tool = self._tool

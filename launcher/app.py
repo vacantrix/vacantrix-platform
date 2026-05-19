@@ -1,7 +1,7 @@
 import sys
 from pathlib import Path
 
-from PySide6.QtCore import Qt, QPoint, QSize
+from PySide6.QtCore import Qt, QPoint, QSize, QTimer
 from PySide6.QtGui import QIcon, QPixmap, QPainter, QColor, QMovie
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
@@ -78,11 +78,11 @@ class _GifBg(QWidget):
             )
             x = (self.width()  - scaled.width())  // 2
             y = (self.height() - scaled.height()) // 2
-            p.setOpacity(0.45)
+            p.setOpacity(0.58)
             p.drawPixmap(x, y, scaled)
 
         # 3. Dark overlay — keeps UI readable
-        p.setOpacity(0.55)
+        p.setOpacity(0.45)
         p.fillRect(self.rect(), QColor(4, 0, 0))
 
         # 4. Icon watermark (cache scaled version)
@@ -267,8 +267,20 @@ class MainWindow(QMainWindow):
             self._go(0)
 
     def _preload_and_show(self):
-        self._catalog.load_once(on_done=self._on_data_ready)
+        self._catalog.load_once(on_done=self._on_data_ready, force=True)
         self._go(1)
+        self._start_update_timer()
+
+    def _start_update_timer(self):
+        self._update_timer = QTimer(self)
+        self._update_timer.setInterval(15 * 60 * 1000)  # каждые 15 минут
+        self._update_timer.timeout.connect(self._silent_update_check)
+        self._update_timer.start()
+
+    def _silent_update_check(self):
+        """Фоновая проверка обновлений без сброса текущего вида каталога."""
+        if self._auth.is_logged_in():
+            self._catalog.load_once(force=True)
 
     def _on_data_ready(self, tools, subs):
         self._cabinet.preload(self._auth.access_token)
@@ -300,6 +312,7 @@ class MainWindow(QMainWindow):
                 return
             show_toast(f"✅ {tool['name']} обновлён", self)
             self._detail.refresh_status()
+            self._catalog.refresh_download_state()
         if not launch(tool["slug"], tool["name"]):
             QMessageBox.warning(self, "Ошибка", f"Не удалось запустить {tool['name']}")
         else:
@@ -310,6 +323,7 @@ class MainWindow(QMainWindow):
         if dlg.exec() == DownloadDialog.Accepted:
             show_toast(f"✅ {tool['name']} скачан!", self)
             self._detail.refresh_status()
+            self._catalog.refresh_download_state()
 
     def mousePressEvent(self, e):
         if e.button() == Qt.LeftButton:

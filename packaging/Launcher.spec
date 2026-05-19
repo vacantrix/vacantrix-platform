@@ -8,7 +8,9 @@ a = Analysis(
     [str(ROOT / 'main.py')],
     pathex=[str(ROOT)],
     binaries=[],
-    datas=[],
+    datas=[
+        (str(ROOT / 'resources'), 'resources'),
+    ],
     hiddenimports=['keyring.backends.Windows', 'PySide6.QtSvg'],
     hookspath=[],
     runtime_hooks=[],

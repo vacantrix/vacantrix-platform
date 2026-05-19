@@ -4,7 +4,8 @@ from pathlib import Path
 import requests
 from PySide6.QtCore import QThread, Signal
 
-TOOLS_DIR = Path(__file__).parent.parent.parent / "tools"
+TOOLS_DIR = Path.home() / "AppData" / "Local" / "VacantrixPlatform" / "tools"
+TOOLS_DIR.mkdir(parents=True, exist_ok=True)
 
 
 def get_local_version(slug: str) -> str | None:

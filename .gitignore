@@ -3,8 +3,8 @@ build/
 dist/
 
 # Runtime data — user-specific, never commit
-data/session.json
-data/catalog_cache.json
+data/
+.env
 
 # Downloaded tool executables
 tools/
