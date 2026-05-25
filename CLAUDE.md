@@ -9,18 +9,19 @@ vacantrix-platform/
 ├── launcher/               ← PySide6 GUI-платформа (магазин + лаунчер инструментов)
 │   ├── app.py              (MainWindow — главное окно)
 │   ├── paths.py            (RESOURCES — путь к ресурсам, работает в dev и EXE)
-│   ├── theme.py            (стили PySide6)
+│   ├── theme.py            (стили PySide6, красная палитра)
 │   ├── core/
 │   │   ├── auth_manager.py (AuthManager — сессия email/password через Supabase)
 │   │   ├── supabase_api.py (все REST-запросы к Supabase)
 │   │   ├── downloader.py   (DownloadWorker, needs_update, launch)
 │   │   ├── cache.py        (дисковый кэш API-ответов)
 │   │   ├── config.py       (SUPABASE_URL, ANON ключ, APP_VERSION)
+│   │   ├── vx_profile.py   (get/upsert vx_profiles — кросс-проектный профиль)
 │   │   └── yookassa_api.py (YooKassa платежи)
 │   ├── screens/
 │   │   ├── auth_screen.py       (экран входа/регистрации)
 │   │   ├── catalog_screen.py    (каталог инструментов)
-│   │   ├── cabinet_screen.py    (личный кабинет, подписки)
+│   │   ├── cabinet_screen.py    (личный кабинет, подписки, display_name)
 │   │   └── tool_detail_screen.py (карточка инструмента)
 │   └── widgets/
 │       ├── tool_card.py         (карточка в каталоге)
@@ -29,43 +30,28 @@ vacantrix-platform/
 │       ├── download_dialog.py   (диалог скачивания EXE)
 │       └── toast.py             (всплывающие уведомления)
 │
-├── vacantrix/              ← Ядро автоматизации (Avito-бот)
-│   ├── avito/
-│   │   ├── bot.py          (AvitoApplyBot — главный класс)
-│   │   ├── driver.py       (DriverManager, InterruptedError, AuthLostError)
-│   │   ├── parser.py       (VacancyParser, ProgressTracker)
-│   │   ├── applier.py      (ApplyHandler)
-│   │   ├── auth.py         (ensure_authenticated, save/load cookies)
-│   │   └── workers.py      (QThread-воркеры для GUI)
-│   └── core/
-│       └── config.py       (AvitoConfig dataclass, load_config)
-│
 ├── resources/              ← UI-ресурсы (иконки, GIF-фон, конфиг)
-├── data/                   ← Runtime-данные (session.json, cookies)
+│   ├── avito_icon.png      ← иконка Авито-бота для каталога (код бота в vacantrix-avito/)
+│   └── screenshots/avito/  ← скриншоты Авито-бота для каталога
+├── data/                   ← Runtime-данные (session.json)
 ├── logs/                   ← Логи запусков
 ├── packaging/              ← PyInstaller spec
-├── main.py                 (CLI-точка входа)
-├── avito_main.py           (CLI-запуск Avito-бота)
-├── run_app.pyw             (GUI-запуск без консоли, Windows)
+├── main.py                 (точка входа)
 ├── build.py                (сборка EXE через PyInstaller)
-├── release.py              (публикация релиза платформы)
-└── release_avito.py        (публикация релиза Avito-бота)
+└── release.py              (публикация релиза платформы на GitHub)
 ```
+
+> ⚠️ Код Авито-бота (`vacantrix/avito/`) **перенесён** в отдельный репозиторий `vacantrix-avito/`
+> (май 2026). В этом репо от него остались только ресурсы (иконка, скриншоты) для каталога.
 
 ## Запуск
 
 ```bash
 # GUI-лаунчер (платформа)
-python run_app.pyw
-
-# CLI-режим (без GUI)
 python main.py
 
-# Avito-бот напрямую (CLI)
-python avito_main.py --config resources/config.yaml
-
-# Dev-запуск с отключённой проверкой подписки
-python main.py --dev
+# Dev-режим (отключена проверка подписки — если поддерживается)
+# python main.py --dev
 ```
 
 ## Сборка и релиз
@@ -74,16 +60,17 @@ python main.py --dev
 # Собрать EXE платформы
 python build.py
 
-# Собрать EXE + создать GitHub Release + обновить ссылку на сайте
+# Собрать EXE + создать GitHub Release
 python release.py
 python release.py --version 1.1.0     # явно задать версию
 python release.py --skip-build        # только опубликовать готовый dist/
-
-# Релиз Avito-бота отдельно
-python release_avito.py
 ```
 
-`APP_VERSION` читается из `launcher/core/config.py`.
+Текущий актуальный релиз: **`v1.0.0`** (`VacantrixLauncher.exe`, 255 МБ).
+
+> В репо также присутствует тег `avito-v1.0.0` — это устаревший релиз Авито-бота,
+> опубликованный до разделения. Его нужно удалить, чтобы `/releases/latest/` снова
+> указывал на платформу.
 
 ## Переменные окружения
 
@@ -98,13 +85,11 @@ YOOKASSA_SHOP_ID=       # ID магазина YooKassa
 YOOKASSA_SECRET_KEY=    # Секретный ключ YooKassa
 ```
 
-`SUPABASE_URL` и `SUPABASE_ANON` также прописаны прямо в `launcher/core/config.py` — тот же Supabase-проект, что и у `vacantrix-hh` (`fgcffgfyehequucnxegb`).
+`SUPABASE_URL` и `SUPABASE_ANON` также прописаны в `launcher/core/config.py`.
 
 ## Архитектура
 
-### Лаунчер (платформа)
-
-`MainWindow` (`launcher/app.py`) — frameless PySide6-окно с анимированным GIF-фоном. Навигация через `QStackedWidget`:
+`MainWindow` (`launcher/app.py`) — PySide6-окно. Навигация через `QStackedWidget`:
 
 | Индекс | Экран | Класс |
 |--------|-------|-------|
@@ -113,26 +98,18 @@ YOOKASSA_SECRET_KEY=    # Секретный ключ YooKassa
 | 2 | Личный кабинет | `CabinetScreen` |
 | 3 | Карточка инструмента | `ToolDetailScreen` |
 
-**Сессия**: `AuthManager` хранит токены в `data/session.json`. При запуске пытается восстановить сессию через `refresh_token`. Истёкший токен автоматически обновляется.
+**Сессия**: `AuthManager` хранит токены в `data/session.json`. При запуске восстанавливает
+сессию через `refresh_token`. Истёкший токен обновляется автоматически.
 
-**Инструменты**: хранятся на диске в `~/AppData/Local/VacantrixPlatform/tools/<slug>/<Name>.exe`. `DownloadWorker` (QThread) скачивает EXE с прогресс-баром. `needs_update()` сравнивает `version.txt` с версией из Supabase.
+**Профиль (`vx_profile.py`)**: при входе вызывается `upsert_platform_profile_async()` —
+синхронизирует `display_name` с таблицей `vx_profiles` (кросс-проектный профиль).
+При сохранении ника в кабинете вызывается `set_display_name_async()`.
 
-**Обновление каталога**: автоматически каждые 15 минут через `QTimer`.
+**Инструменты**: хранятся в `~/AppData/Local/VacantrixPlatform/tools/<slug>/<Name>.exe`.
+`DownloadWorker` (QThread) скачивает EXE с прогресс-баром.
+`needs_update()` сравнивает `version.txt` с версией из Supabase.
 
-### Avito-бот (`vacantrix/avito/`)
-
-Структура зеркалирует `vacantrix-hh/hh_core/vacantrix/hh/`. Главный цикл в `AvitoApplyBot.run()`:
-
-1. `DriverManager.create_driver()` — Chrome с анти-бот флагами
-2. `ensure_authenticated()` — куки → ручной вход
-3. `VacancyParser.collect_visible_vacancy_links()` — парсинг ссылок на вакансии
-4. `ApplyHandler.apply_to_vacancy()` — отклик на каждую вакансию
-
-`DriverManager.with_reconnect(fn)` — при `WebDriverException` пересоздаёт драйвер (до 2 попыток) и переаутентифицируется.
-
-### Supabase (таблицы)
-
-Тот же проект, что у `vacantrix-hh`. Таблицы платформы:
+### Supabase (таблицы платформы)
 
 | Таблица | Назначение |
 |---------|-----------|
@@ -142,14 +119,18 @@ YOOKASSA_SECRET_KEY=    # Секретный ключ YooKassa
 | `subscriptions` | Подписки пользователей (user_id, tool_id, expires_at) |
 | `trials` | Счётчик пробных откликов (user_id, tool_id, responses_used) |
 | `payments` | История платежей |
+| `vx_profiles` | Единый профиль (display_name, hh_applicant_id, avito_user_id) — кросс-проектный |
 
 ### Оплата (YooKassa)
 
-`PaymentModal` → `supabase_api.create_payment()` → Edge Function `create-payment` → YooKassa invoice. После успешной оплаты вызывается `activate_subscription()`.
+`PaymentModal` → `supabase_api.create_payment()` → Edge Function `create-payment` → YooKassa invoice.
+После успешной оплаты вызывается `activate_subscription()`.
 
 ## Связанные проекты
 
 | Проект | Связь |
 |--------|-------|
-| `vacantrix-hh` | Тот же Supabase-проект; HH-бот распространяется через эту платформу |
+| `vacantrix-avito` | Авито-бот (отдельный репо), каталог показывает его ресурсы из `resources/` |
+| `vacantrix-hh` | HH-бот; распространяется через эту платформу |
+| `vacantrix-tasks` | Биржа задач; использует те же `vx_profiles` |
 | `vacantrix-web` | Сайт-витрина на GitHub Pages |
