@@ -46,7 +46,7 @@ load_dotenv(ROOT.parent / "Vacantrix" / ".env")  # запасной .env из о
 
 # ── Конфигурация ──────────────────────────────────────────────────────
 GITHUB_TOKEN  = os.getenv("GITHUB_TOKEN", "")
-GITHUB_OWNER  = "romakotel30-cell"
+GITHUB_OWNER  = "vacantrix"
 GITHUB_REPO   = "vacantrix-platform"
 
 SUPABASE_URL  = os.getenv("SUPABASE_URL", "")
@@ -268,7 +268,7 @@ def main() -> None:
     print(f"\n{'='*52}")
     print(f"  Всё готово!")
     print(f"  Релиз : https://github.com/{GITHUB_OWNER}/{GITHUB_REPO}/releases/latest")
-    print(f"  Сайт  : https://romakotel30-cell.github.io/vacantrix-web/")
+    print(f"  Сайт  : https://vacantrix.github.io/vacantrix-web/")
     print(f"{'='*52}\n")
 
 

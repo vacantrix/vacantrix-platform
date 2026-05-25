@@ -1,8 +1,10 @@
 from datetime import datetime, timezone
 from pathlib import Path
 
+import requests as _requests
+
 from PySide6.QtCore import Qt, QThread, Signal, QPoint, QRect, QTimer
-from PySide6.QtGui import QPixmap, QCursor, QPainter, QColor, QBrush, QPen
+from PySide6.QtGui import QPixmap, QCursor, QPainter, QColor, QBrush
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel,
     QPushButton, QFrame, QSizePolicy, QScrollArea,
@@ -14,12 +16,19 @@ from launcher.core import cache as disk_cache
 from launcher.core.downloader import needs_update, is_downloaded
 from launcher.widgets.tool_card import TOOL_ICONS
 
-DISPLAY_NAMES = {"vacantrix": "VACANTRIX-HH.ru"}
+DISPLAY_NAMES = {
+    "vacantrix": "VACANTRIX-HH.ru",
+    "avito":     "VACANTRIX-Авито",
+}
 
 PANEL_H  = 280
-PANEL_W  = 230
-BANNER_H = 130
-SB_W     = 12   # scrollbar width
+PANEL_W  = 115
+BANNER_H = PANEL_W  # квадратный баннер = квадратная иконка без зазоров
+SB_W     = 12
+
+# Папка для кэша иконок, скачанных с сервера
+_ICON_CACHE = Path.home() / "AppData" / "Local" / "VacantrixPlatform" / "icons"
+_ICON_CACHE.mkdir(parents=True, exist_ok=True)
 
 
 def _days_left(expires_at: str) -> int:
@@ -27,24 +36,42 @@ def _days_left(expires_at: str) -> int:
     return max(0, (dt - datetime.now(tz=timezone.utc)).days)
 
 
+def _resolve_icon(slug: str, icon_url: str | None) -> str | None:
+    """
+    Возвращает путь к иконке:
+    1. Локальный файл из TOOL_ICONS (resources/)
+    2. Закэшированный скачанный файл
+    3. None (нет иконки)
+    """
+    # 1. Локальный файл разработчика
+    local = TOOL_ICONS.get(slug)
+    if local and Path(local).exists():
+        return local
+
+    # 2. Уже скачанный кэш
+    if icon_url and icon_url.startswith("http"):
+        ext = Path(icon_url.split("?")[0]).suffix or ".png"
+        cached = _ICON_CACHE / f"{slug}{ext}"
+        if cached.exists():
+            return str(cached)
+
+    return None
+
+
 # ── Custom scrollbar ──────────────────────────────────────────────────────────
 
 class _ScrollBar(QWidget):
-    """Thin custom scrollbar drawn directly via QPainter. Supports drag."""
-
-    scrolled = Signal(float)   # 0.0 – 1.0
+    scrolled = Signal(float)
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setFixedWidth(SB_W)
         self.setCursor(Qt.ArrowCursor)
-        self._ratio    = 1.0   # thumb_h / track_h
-        self._pos      = 0.0   # 0.0 – 1.0
+        self._ratio    = 1.0
+        self._pos      = 0.0
         self._dragging = False
         self._drag_y   = 0
         self._drag_p0  = 0.0
-
-    # ── Public ────────────────────────────────────────────────────────────────
 
     def update_state(self, value: int, maximum: int, page_step: int):
         total = maximum + page_step
@@ -52,38 +79,24 @@ class _ScrollBar(QWidget):
         self._pos   = value / maximum if maximum > 0 else 0.0
         self.update()
 
-    # ── Thumb geometry ────────────────────────────────────────────────────────
-
     def _thumb_rect(self) -> QRect:
-        h        = self.height()
-        thumb_h  = max(28, int(h * self._ratio))
-        max_top  = h - thumb_h
-        top      = int(max_top * self._pos)
+        h       = self.height()
+        thumb_h = max(28, int(h * self._ratio))
+        max_top = h - thumb_h
+        top     = int(max_top * self._pos)
         return QRect(2, top, self.width() - 4, thumb_h)
-
-    # ── Paint ─────────────────────────────────────────────────────────────────
 
     def paintEvent(self, _):
         p = QPainter(self)
         p.setRenderHint(QPainter.Antialiasing)
-
-        # Track
         p.setPen(Qt.NoPen)
         p.setBrush(QBrush(QColor(8, 2, 2, 160)))
         p.drawRoundedRect(0, 0, self.width(), self.height(), 3, 3)
-
-        # Thumb
         r = self._thumb_rect()
-        if self._dragging:
-            color = QColor(220, 40, 40, 230)
-        else:
-            color = QColor(180, 22, 22, 190)
+        color = QColor(220, 40, 40, 230) if self._dragging else QColor(180, 22, 22, 190)
         p.setBrush(QBrush(color))
         p.drawRoundedRect(r, 3, 3)
-
         p.end()
-
-    # ── Mouse events ──────────────────────────────────────────────────────────
 
     def mousePressEvent(self, e):
         if e.button() == Qt.LeftButton:
@@ -94,13 +107,11 @@ class _ScrollBar(QWidget):
                 self._drag_p0  = self._pos
                 self.setCursor(Qt.ClosedHandCursor)
             else:
-                # Jump to clicked position
                 h       = self.height()
                 thumb_h = max(28, int(h * self._ratio))
                 max_top = h - thumb_h
                 if max_top > 0:
-                    new_pos = max(0.0, min(1.0,
-                                  (e.pos().y() - thumb_h / 2) / max_top))
+                    new_pos = max(0.0, min(1.0, (e.pos().y() - thumb_h / 2) / max_top))
                     self._pos = new_pos
                     self.update()
                     self.scrolled.emit(self._pos)
@@ -117,9 +128,9 @@ class _ScrollBar(QWidget):
                 self.update()
                 self.scrolled.emit(self._pos)
         else:
-            r = self._thumb_rect()
             self.setCursor(
-                Qt.OpenHandCursor if r.contains(e.pos()) else Qt.ArrowCursor
+                Qt.OpenHandCursor if self._thumb_rect().contains(e.pos())
+                else Qt.ArrowCursor
             )
 
     def mouseReleaseEvent(self, e):
@@ -129,7 +140,7 @@ class _ScrollBar(QWidget):
             self.update()
 
 
-# ── Scroll area (native scrollbars hidden) ────────────────────────────────────
+# ── Scroll area ───────────────────────────────────────────────────────────────
 
 class _Col(QScrollArea):
     def __init__(self, parent=None):
@@ -140,10 +151,10 @@ class _Col(QScrollArea):
         self.setStyleSheet("background: transparent; border: none;")
 
     def wheelEvent(self, e):
-        e.ignore()   # bubble up to CatalogScreen
+        e.ignore()
 
 
-# ── Worker ────────────────────────────────────────────────────────────────────
+# ── Workers ───────────────────────────────────────────────────────────────────
 
 class _LoadWorker(QThread):
     done  = Signal(list, list)
@@ -156,10 +167,30 @@ class _LoadWorker(QThread):
     def run(self):
         try:
             tools = api.get_tools()
-            subs  = api.get_subscriptions(self._token)
+            subs  = api.get_subscriptions(self._token) if self._token else []
             self.done.emit(tools, subs)
         except Exception as e:
             self.error.emit(str(e))
+
+
+class _IconDownloadWorker(QThread):
+    """Скачивает иконку инструмента с сервера и сохраняет в кэш."""
+    done = Signal(str, str)   # slug, local_path
+
+    def __init__(self, slug: str, url: str, dest: Path):
+        super().__init__()
+        self._slug = slug
+        self._url  = url
+        self._dest = dest
+
+    def run(self):
+        try:
+            r = _requests.get(self._url, timeout=10)
+            r.raise_for_status()
+            self._dest.write_bytes(r.content)
+            self.done.emit(self._slug, str(self._dest))
+        except Exception:
+            pass
 
 
 # ── Catalog screen ────────────────────────────────────────────────────────────
@@ -173,10 +204,12 @@ class CatalogScreen(QWidget):
 
     def __init__(self, auth: AuthManager, parent=None):
         super().__init__(parent)
-        self._auth    = auth
-        self._worker  = None
-        self._loaded  = False
-        self._on_done = None
+        self._auth          = auth
+        self._worker        = None
+        self._icon_workers  = []   # держим ссылки чтобы QThread не удалился GC
+        self._loaded        = False
+        self._on_done       = None
+        self._banner_by_slug: dict[str, QLabel] = {}  # для обновления иконок
         self._build()
 
     # ── Public ────────────────────────────────────────────────────────────────
@@ -199,7 +232,6 @@ class CatalogScreen(QWidget):
         self._fetch()
 
     def refresh_download_state(self):
-        """Перерисовывает карточки из кеша — обновляет кнопки после скачивания."""
         cached = disk_cache.load()
         if cached:
             tools, subs = cached
@@ -212,18 +244,16 @@ class CatalogScreen(QWidget):
         root.setContentsMargins(0, 0, 0, 0)
         root.setSpacing(0)
 
-        # ── Header ────────────────────────────────────────────────────────────
+        # Header
         header = QFrame()
         header.setProperty("class", "header")
         header.setFixedHeight(52)
         h_lay = QHBoxLayout(header)
-        h_lay.setContentsMargins(16, 0, 28, 0)   # 28 right = leave room for scrollbar
+        h_lay.setContentsMargins(16, 0, 28, 0)
         h_lay.setSpacing(8)
 
         logo = QLabel("Vacantrix Platform")
-        logo.setStyleSheet(
-            "font-size: 16px; font-weight: bold; color: #eeeef5; letter-spacing: 0.5px;"
-        )
+        logo.setStyleSheet("font-size: 16px; font-weight: bold; color: #eeeef5; letter-spacing: 0.5px;")
         h_lay.addWidget(logo)
         h_lay.addStretch()
 
@@ -245,14 +275,13 @@ class CatalogScreen(QWidget):
 
         root.addWidget(header)
 
-        # ── Mid: left column | transparent center | right column ──────────────
+        # Mid
         mid = QWidget()
         mid.setStyleSheet("background: transparent;")
         mid_lay = QHBoxLayout(mid)
-        mid_lay.setContentsMargins(0, 0, SB_W + 2, 0)   # right gap for scrollbar
+        mid_lay.setContentsMargins(0, 0, SB_W + 2, 0)
         mid_lay.setSpacing(0)
 
-        # Left column
         self._left_scroll = _Col()
         self._left_scroll.setFixedWidth(PANEL_W + 24)
         lc = QWidget()
@@ -264,13 +293,11 @@ class CatalogScreen(QWidget):
         self._left_scroll.setWidget(lc)
         mid_lay.addWidget(self._left_scroll)
 
-        # Transparent center (GIF shows through)
         center = QWidget()
         center.setStyleSheet("background: transparent;")
         center.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         mid_lay.addWidget(center, stretch=1)
 
-        # Right column
         self._right_scroll = _Col()
         self._right_scroll.setFixedWidth(PANEL_W + 24)
         rc = QWidget()
@@ -297,6 +324,13 @@ class CatalogScreen(QWidget):
         f_lay.addWidget(self._status_lbl)
         f_lay.addStretch()
 
+        self._retry_btn = QPushButton("Повторить")
+        self._retry_btn.setFixedHeight(34)
+        self._retry_btn.setFixedWidth(100)
+        self._retry_btn.hide()
+        self._retry_btn.clicked.connect(self.load)
+        f_lay.addWidget(self._retry_btn)
+
         refresh = QPushButton("⟳  Обновить")
         refresh.setFixedHeight(34)
         refresh.setFixedWidth(120)
@@ -304,31 +338,22 @@ class CatalogScreen(QWidget):
         f_lay.addWidget(refresh)
         root.addWidget(footer)
 
-        # ── Custom scrollbar overlay (full height, right edge) ─────────────────
+        # Custom scrollbar
         self._sb = _ScrollBar(self)
         self._sb.scrolled.connect(self._on_sb_dragged)
         self._sb.raise_()
+        self._left_scroll.verticalScrollBar().valueChanged.connect(self._sync_sb)
 
-        # Sync native scrollbar → custom scrollbar
-        self._left_scroll.verticalScrollBar().valueChanged.connect(
-            self._sync_sb
-        )
-
-        # Pre-fill placeholders
         for _ in range(4):
             self._left_vlay.addWidget(self._make_placeholder())
             self._right_vlay.addWidget(self._make_placeholder())
 
         QTimer.singleShot(0, self._sync_sb)
 
-    # ── Resize — keep scrollbar pinned to right edge, full height ─────────────
-
     def resizeEvent(self, e):
         super().resizeEvent(e)
         self._sb.setGeometry(self.width() - SB_W, 0, SB_W, self.height())
         self._sb.raise_()
-
-    # ── Wheel — scroll both columns together ──────────────────────────────────
 
     def wheelEvent(self, e):
         step = -e.angleDelta().y() // 2
@@ -338,8 +363,6 @@ class CatalogScreen(QWidget):
         rsb.setValue(rsb.value() + step)
         self._sync_sb()
         e.accept()
-
-    # ── Scrollbar sync ────────────────────────────────────────────────────────
 
     def _sync_sb(self):
         sb = self._left_scroll.verticalScrollBar()
@@ -356,18 +379,30 @@ class CatalogScreen(QWidget):
     def _fetch(self):
         if self._worker and self._worker.isRunning():
             return
+        self._retry_btn.hide()
         self._worker = _LoadWorker(self._auth.access_token)
         self._worker.done.connect(self._on_fetched)
-        self._worker.error.connect(lambda e: self._status_lbl.setText(f"Ошибка: {e}"))
+        self._worker.error.connect(self._on_fetch_error)
         self._worker.start()
 
     def _on_fetched(self, tools: list, subs: list):
         disk_cache.save(tools, subs)
         self._loaded = True
+        self._retry_btn.hide()
         self._render(tools, subs, from_cache=False)
         if self._on_done:
             self._on_done(tools, subs)
             self._on_done = None
+
+    def _on_fetch_error(self, msg: str):
+        # Показываем ошибку, но кэшированные данные остаются видны
+        self._status_lbl.setText(f"Ошибка: {msg[:80]}")
+        self._retry_btn.show()
+        # Если кэш есть — он уже отрендерен в load_once; если нет — рендерим пустоту
+        if not self._loaded:
+            cached = disk_cache.load()
+            if cached:
+                self._render(*cached, from_cache=True)
 
     def _clear_col(self, vlay: QVBoxLayout):
         while vlay.count():
@@ -378,6 +413,7 @@ class CatalogScreen(QWidget):
     def _render(self, tools: list, subs: list, from_cache: bool = False):
         self._clear_col(self._left_vlay)
         self._clear_col(self._right_vlay)
+        self._banner_by_slug.clear()
 
         sub_by_tool = {s["tool_id"]: s for s in subs}
         slots = [(self._left_vlay,)] * 4 + [(self._right_vlay,)] * 4
@@ -393,7 +429,7 @@ class CatalogScreen(QWidget):
 
         QTimer.singleShot(50, self._sync_sb)
 
-        suffix = " (кеш)" if from_cache else ""
+        suffix = " (кэш)" if from_cache else ""
         self._status_lbl.setText(f"Инструментов: {len(tools)}{suffix}")
 
     # ── Panel builders ────────────────────────────────────────────────────────
@@ -409,6 +445,7 @@ class CatalogScreen(QWidget):
         lay.setContentsMargins(0, 0, 0, 14)
         lay.setSpacing(0)
 
+        # ── Banner / иконка ───────────────────────────────────────────────────
         banner = QLabel()
         banner.setFixedHeight(BANNER_H)
         banner.setAlignment(Qt.AlignCenter)
@@ -417,17 +454,28 @@ class CatalogScreen(QWidget):
             "stop:0 rgba(40,5,5,255), stop:1 rgba(15,2,2,255));"
             "border-radius: 12px 12px 0 0;"
         )
-        icon_path = TOOL_ICONS.get(slug)
-        if icon_path and Path(icon_path).exists():
-            px = QPixmap(icon_path).scaled(
-                100, 100, Qt.KeepAspectRatio, Qt.SmoothTransformation
-            )
-            banner.setPixmap(px)
+
+        icon_url  = tool.get("icon_url") or ""
+        icon_path = _resolve_icon(slug, icon_url)
+
+        if icon_path:
+            px = QPixmap(icon_path)
+            if not px.isNull():
+                banner.setPixmap(
+                    px.scaled(PANEL_W, PANEL_W, Qt.IgnoreAspectRatio, Qt.SmoothTransformation)
+                )
+            else:
+                self._set_banner_emoji(banner)
         else:
-            banner.setText(tool.get("icon_url") or "🔧")
-            banner.setStyleSheet(banner.styleSheet() + " font-size: 48px;")
+            self._set_banner_emoji(banner)
+            # Запускаем фоновую загрузку иконки с сервера
+            if icon_url.startswith("http"):
+                self._banner_by_slug[slug] = banner
+                self._start_icon_download(slug, icon_url)
+
         lay.addWidget(banner)
 
+        # ── Info ──────────────────────────────────────────────────────────────
         info = QVBoxLayout()
         info.setContentsMargins(14, 10, 14, 0)
         info.setSpacing(5)
@@ -459,8 +507,7 @@ class CatalogScreen(QWidget):
             st = QLabel(f"✅  Активна: {days} дн.")
             st.setStyleSheet("color: #4caf50; font-size: 10px; font-weight: bold;")
             info.addWidget(st)
-            name_val   = tool.get("name", "")
-            downloaded = is_downloaded(slug, name_val)
+            downloaded = is_downloaded(slug, tool.get("name", ""))
             outdated   = needs_update(slug, tool.get("version", ""))
             if not downloaded:
                 btn_text = "⬇  Скачать"
@@ -470,9 +517,7 @@ class CatalogScreen(QWidget):
                 btn_text = "▶  Запустить"
             btn = QPushButton(btn_text)
             btn.setFixedHeight(34)
-            btn.clicked.connect(
-                lambda checked=False, t=tool: self.launch_requested.emit(t)
-            )
+            btn.clicked.connect(lambda checked=False, t=tool: self.launch_requested.emit(t))
             info.addWidget(btn)
         else:
             st = QLabel("🔒  Нет подписки")
@@ -480,19 +525,23 @@ class CatalogScreen(QWidget):
             info.addWidget(st)
             btn = QPushButton("Купить подписку")
             btn.setFixedHeight(34)
-            btn.clicked.connect(
-                lambda checked=False, t=tool: self.buy_requested.emit(t)
-            )
+            btn.clicked.connect(lambda checked=False, t=tool: self.buy_requested.emit(t))
             info.addWidget(btn)
 
         lay.addLayout(info)
 
+        # Весь panel кликабелен → открывает детали
         def _on_press(e, t=tool, s=sub):
             if e.button() == Qt.LeftButton:
                 self.tool_selected.emit(t, s)
 
         panel.mousePressEvent = _on_press
         return panel
+
+    @staticmethod
+    def _set_banner_emoji(banner: QLabel):
+        banner.setText("🔧")
+        banner.setStyleSheet(banner.styleSheet() + " font-size: 48px;")
 
     def _make_placeholder(self) -> QFrame:
         panel = QFrame()
@@ -536,3 +585,32 @@ class CatalogScreen(QWidget):
 
         lay.addLayout(info)
         return panel
+
+    # ── Icon async download ───────────────────────────────────────────────────
+
+    def _start_icon_download(self, slug: str, url: str):
+        ext  = Path(url.split("?")[0]).suffix or ".png"
+        dest = _ICON_CACHE / f"{slug}{ext}"
+        w = _IconDownloadWorker(slug, url, dest)
+        w.done.connect(self._on_icon_downloaded)
+        self._icon_workers.append(w)
+        w.finished.connect(lambda wref=w: self._icon_workers.remove(wref)
+                           if wref in self._icon_workers else None)
+        w.start()
+
+    def _on_icon_downloaded(self, slug: str, local_path: str):
+        banner = self._banner_by_slug.get(slug)
+        if not banner:
+            return
+        px = QPixmap(local_path)
+        if px.isNull():
+            return
+        banner.setText("")
+        banner.setStyleSheet(
+            "background: qlineargradient(x1:0,y1:0,x2:1,y2:1,"
+            "stop:0 rgba(40,5,5,255), stop:1 rgba(15,2,2,255));"
+            "border-radius: 12px 12px 0 0;"
+        )
+        banner.setPixmap(
+            px.scaled(PANEL_W, PANEL_W, Qt.IgnoreAspectRatio, Qt.SmoothTransformation)
+        )

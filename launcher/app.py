@@ -19,7 +19,7 @@ from launcher.widgets.payment_modal import PaymentModal
 from launcher.widgets.download_dialog import DownloadDialog
 from launcher.widgets.toast import show_toast
 
-RESOURCES     = Path(__file__).parent.parent / "resources"
+from launcher.paths import RESOURCES
 ICON_PATH     = RESOURCES / "vacantrix_icon.png"
 GIF_PATH      = RESOURCES / "background.gif"
 BTN_CLOSE_IMG = RESOURCES / "btn_close.png"
@@ -246,6 +246,7 @@ class MainWindow(QMainWindow):
 
         self._cabinet = CabinetScreen(self._auth)
         self._cabinet.back_requested.connect(lambda: self._go(1))
+        self._cabinet.logout_requested.connect(self._on_logout)
         self._stack.addWidget(self._cabinet)              # 2
 
         self._detail = ToolDetailScreen(self._auth)

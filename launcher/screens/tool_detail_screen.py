@@ -30,7 +30,7 @@ class _TrialWorker(QThread):
         except Exception:
             self.done.emit(0)
 
-_RESOURCES = Path(__file__).resolve().parent.parent.parent / "resources"
+from launcher.paths import RESOURCES as _RESOURCES
 
 _LOCAL_SCREENSHOTS: dict[str, list[str]] = {
     "vacantrix": [
@@ -39,6 +39,13 @@ _LOCAL_SCREENSHOTS: dict[str, list[str]] = {
         str(_RESOURCES / "screenshots" / "03_stats.png"),
         str(_RESOURCES / "screenshots" / "04_settings.png"),
         str(_RESOURCES / "screenshots" / "05_hh.jpg"),
+    ],
+    "avito": [
+        # Скриншоты Авито-бота — добавьте файлы в resources/screenshots/avito/
+        p for p in [
+            str(_RESOURCES / "screenshots" / "avito" / "01_main.png"),
+            str(_RESOURCES / "screenshots" / "avito" / "02_settings.png"),
+        ] if Path(p).exists()
     ],
 }
 

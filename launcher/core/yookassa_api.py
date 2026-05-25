@@ -4,7 +4,7 @@ import requests
 _SHOP_ID   = "1353662"
 _SECRET    = "live_QFLgQEKALBc_IR9qE4wA9Whgeu79E7IEMSq-acJf4MA"
 _BASE      = "https://api.yookassa.ru/v3"
-_RETURN_URL = "https://romakotel30-cell.github.io/vacantrix-web/"
+_RETURN_URL = "https://vacantrix.github.io/vacantrix-web/"
 
 
 def create_payment(amount_rub: int, plan_name: str, days: int,

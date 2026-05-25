@@ -4,10 +4,11 @@ from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import QFrame, QVBoxLayout, QHBoxLayout, QLabel, QPushButton
 from PySide6.QtGui import QPixmap, QCursor
 
-RESOURCES = Path(__file__).parent.parent.parent / "resources"
+from launcher.paths import RESOURCES
 
 TOOL_ICONS: dict[str, str] = {
-    "vacantrix": str(RESOURCES / "vacantrix_icon.png"),
+    "vacantrix": str(RESOURCES / "hh_icon.png"),
+    "avito":     str(RESOURCES / "avito_icon.png"),
 }
 
 

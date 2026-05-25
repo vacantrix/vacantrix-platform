@@ -11,7 +11,7 @@ import requests as _requests
 _ANIM_MS     = 520
 _INTERVAL_MS = 4500
 _RADIUS      = 10
-_RES         = Path(__file__).resolve().parent.parent.parent / "resources"
+from launcher.paths import RESOURCES as _RES
 
 
 # ── Загрузчик сетевых изображений ────────────────────────────────────────────

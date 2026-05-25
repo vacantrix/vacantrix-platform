@@ -1,10 +1,18 @@
 import json
+import sys
 from pathlib import Path
 from datetime import datetime, timezone
 
 from . import supabase_api as api
 
-_SESSION_FILE = Path(__file__).parent.parent.parent / "data" / "session.json"
+
+def _session_file_path() -> Path:
+    if getattr(sys, "frozen", False):
+        return Path.home() / "AppData" / "Local" / "VacantrixPlatform" / "data" / "session.json"
+    return Path(__file__).parent.parent.parent / "data" / "session.json"
+
+
+_SESSION_FILE = _session_file_path()
 
 
 class AuthManager:
