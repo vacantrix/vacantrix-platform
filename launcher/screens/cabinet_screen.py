@@ -13,9 +13,11 @@ from PySide6.QtWidgets import (
 
 from launcher.core.auth_manager import AuthManager
 from launcher.core import supabase_api as api
+from launcher.core import vx_profile as vxp
 
+from launcher.paths import RESOURCES as _RES_DIR
 _PREFS_FILE    = Path(__file__).parent.parent.parent / "data" / "preferences.json"
-_REFRESH_IMG   = Path(__file__).parent.parent.parent / "resources" / "Кнопка обновить.png"
+_REFRESH_IMG   = _RES_DIR / "Кнопка обновить.png"
 
 AVATAR_EMOJIS = [
     "👤", "😊", "😎", "🚀", "💼", "🔥", "⚡", "🎯",
@@ -90,6 +92,7 @@ def _sep() -> QFrame:
 
 class CabinetScreen(QWidget):
     back_requested = Signal()
+    logout_requested = Signal()
 
     def __init__(self, auth: AuthManager, parent=None):
         super().__init__(parent)
@@ -144,6 +147,16 @@ class CabinetScreen(QWidget):
         title.setStyleSheet("font-size: 16px; font-weight: bold; color: #eeeef5;")
         title.setAlignment(Qt.AlignCenter)
         h_lay.addWidget(title, stretch=1)
+
+        logout_btn = QPushButton("Выйти")
+        logout_btn.setProperty("class", "flat")
+        logout_btn.setFixedHeight(30)
+        logout_btn.setStyleSheet(
+            "QPushButton { color: #c44; font-size: 12px; padding: 0 10px; }"
+            "QPushButton:hover { color: #f66; }"
+        )
+        logout_btn.clicked.connect(self.logout_requested)
+        h_lay.addWidget(logout_btn)
 
         h_lay.addWidget(self._make_refresh_btn(44))
         root.addWidget(header)
@@ -412,6 +425,12 @@ class CabinetScreen(QWidget):
             self._display_name_lbl.setText(val or email.split("@")[0])
             nick_save_btn.setText("✓  Сохранено")
             QTimer.singleShot(1800, lambda: nick_save_btn.setText("Сохранить"))
+            # Синхронизируем в vx_profiles (фоновый поток)
+            web_user_id = user.get("id")
+            if web_user_id and self._auth.access_token:
+                vxp.set_display_name_async(
+                    self._auth.access_token, web_user_id, val
+                )
 
         nick_save_btn.clicked.connect(_save_nick)
         self._nick_edit.returnPressed.connect(_save_nick)
@@ -430,6 +449,38 @@ class CabinetScreen(QWidget):
         self._worker.done.connect(self._on_loaded)
         self._worker.error.connect(lambda e: self._status_lbl.setText(f"Ошибка: {e}"))
         self._worker.start()
+        # Синхронизируем профиль с vx_profiles в фоне
+        self._sync_vx_profile()
+
+    def _sync_vx_profile(self):
+        """Upsert в vx_profiles в фоне; если там есть display_name — применяем к UI."""
+        token = self._auth.access_token
+        user  = self._auth.user or {}
+        web_user_id = user.get("id")
+        if not token or not web_user_id:
+            return
+
+        local_name = self._prefs.get("display_name") or None
+
+        def _on_synced(profile):
+            if not profile:
+                return
+            remote_name = profile.get("display_name")
+            if remote_name and remote_name != self._prefs.get("display_name"):
+                # Удалённое имя приоритетнее локального — применяем
+                _save_prefs({"display_name": remote_name})
+                self._prefs["display_name"] = remote_name
+                try:
+                    self._display_name_lbl.setText(remote_name)
+                    self._nick_edit.setText(remote_name)
+                except RuntimeError:
+                    pass
+
+        vxp.upsert_platform_profile_async(
+            token, web_user_id,
+            display_name=local_name,
+            callback=_on_synced,
+        )
 
     def _on_loaded(self, subs: list, payments: list):
         self._fill_subs(subs)
